@@ -348,7 +348,6 @@ def _get_regexp_pattern(regexp):
 def _get_cors_origin(options, request_origin):
     origins = options.get('origins')
     wildcard = r'.*' in origins
-    logger.debug("Origins Option %s", [origins])
 
     # If the Origin header is not present terminate this set of steps.
     # The request is outside the scope of this specification.-- W3Spec
@@ -362,7 +361,7 @@ def _get_cors_origin(options, request_origin):
         # If the value of the Origin header is a case-sensitive match
         # for any of the values in list of origins
         elif _try_match_any(request_origin, origins):
-            logger.debug("Given origin matches set of allowed origins")
+            getLogger().debug("Given origin matches set of allowed origins")
             # Add a single Access-Control-Allow-Origin header, with either
             # the value of the Origin header or the string "*" as value.
             # -- W3Spec
@@ -376,17 +375,25 @@ def _get_cors_origin(options, request_origin):
         getLogger().debug("'Origin' header was not set, which means CORS was not requested, skipping")
         return None
 
+def _get_allow_headers(options, request_headers):
+    acl_request_headers = request_headers.get(ACL_REQUEST_HEADERS, [])
+    getLogger().info("ACL_REQ_HEADERS: %s", acl_request_headers)
+    getLogger().info("allow_headers: %s", options.get('allow_headers'))
+    if acl_request_headers:
+        acl_request_headers = [h.strip() for h in acl_request_headers.split(',')]
+        matching_headers = filter(
+            lambda h: _try_match_any(h, options.get('allow_headers')), # any header that matches in the allow_headers
+            acl_request_headers
+        )
+        if matching_headers:
+            return ', '.join(sorted(matching_headers))
 
-def _get_cors_headers(options, request_headers, request_method,
-                      response_headers=None):
+    return None
+
+
+def _get_cors_headers(options, request_headers, request_method, response_headers):
     origin_to_set = _get_cors_origin(options, request_headers.get('Origin'))
-
-    if 'Vary' in response_headers:
-        headers = {'Vary': response_headers.get('Vary')}
-    else:
-        headers = {}
-
-
+    headers = {}
 
     if origin_to_set is None:  # CORS is not enabled for this route
         return headers
@@ -410,21 +417,13 @@ def _get_cors_headers(options, request_headers, request_method,
 
             # If method is not a case-sensitive match for any of the values in
             # list of methods do not set any additional headers and terminate this set of steps.
-
-            acl_request_headers = request_headers.get(ACL_REQUEST_HEADERS, [])
-            if acl_request_headers:
-                acl_request_headers = [h.strip() for h in acl_request_headers.split(',')]
-
-            def matches_allows_headers(h):
-                return _try_match_any(h, options.get('allow_headers'))
-
-            headers[ACL_ALLOW_HEADERS] = ', '.join(filter(matches_allows_headers, acl_request_headers))
+            headers[ACL_ALLOW_HEADERS] = _get_allow_headers(options, request_headers)
             headers[ACL_MAX_AGE] = options.get('max_age')
             headers[ACL_METHODS] = options.get('methods')
 
     # http://www.w3.org/TR/cors/#resource-implementation
     if headers[ACL_ORIGIN] != '*' and options.get('vary_header'):
-        vary = ['Origin', headers.get('Vary')]
+        vary = ['Origin', response_headers.get('Vary')]
         headers['Vary'] = ', '. join(v for v in vary if v is not None)
 
     return dict((k, v) for k, v in headers.items() if v is not None)

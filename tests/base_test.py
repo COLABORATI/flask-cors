@@ -49,7 +49,7 @@ class FlaskCorsTestCase(unittest.TestCase):
         headers = kwargs.pop('headers', {})
         if _origin:
             headers.update(Origin=_origin)
-        print headers
+
         with self.app.test_client() as c:
             return getattr(c, verb)(*args, headers=headers, **kwargs)
 
@@ -75,15 +75,16 @@ class FlaskCorsTestCase(unittest.TestCase):
         return self._request('delete', *args, **kwargs)
 
     def preflight(self, path, method='GET', cors_request_headers=None, json=True, **kwargs):
-        headers = {'Access-Control-Request-Method': method}
+        kwargs['headers'] = kwargs.get('headers', {})
 
         if cors_request_headers:
-            headers['Access-Control-Request-Headers'] = ','.join(cors_request_headers)
-
+            kwargs['headers'].update({'Access-Control-Request-Headers': ', '.join(cors_request_headers)})
         if json:
-            headers.update({'Content-Type':'application/json'})
+            kwargs['headers'].update({'Content-Type':'application/json'})
 
-        return self.options(path,headers=headers)
+        kwargs['headers'].update({'Access-Control-Request-Method': method})
+
+        return self.options(path,**kwargs)
 
     def assertHasACLOrigin(self, resp, origin=None):
         if origin is None:
