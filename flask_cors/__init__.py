@@ -30,13 +30,15 @@ if not hasattr(logging, 'NullHandler'):
             pass
     logging.NullHandler = NullHandler
 
-# Common string constants
+# Response Headers
 ACL_ORIGIN = 'Access-Control-Allow-Origin'
 ACL_METHODS = 'Access-Control-Allow-Methods'
 ACL_ALLOW_HEADERS = 'Access-Control-Allow-Headers'
 ACL_EXPOSE_HEADERS = 'Access-Control-Expose-Headers'
 ACL_CREDENTIALS = 'Access-Control-Allow-Credentials'
 ACL_MAX_AGE = 'Access-Control-Max-Age'
+
+# Request Header
 ACL_REQUEST_METHOD = 'Access-Control-Request-Method'
 ACL_REQUEST_HEADERS = 'Access-Control-Request-Headers'
 
@@ -60,6 +62,7 @@ FLASK_CORS_EVALUATED = '_FLASK_CORS_EVALUATED'
 RegexObject = type(re.compile(''))
 _defaults_dict = dict(origins='*',
                       methods=ALL_METHODS,
+                      allow_headers='*',
                       always_send=True,
                       automatic_options=True,
                       send_wildcard=True,
@@ -77,11 +80,11 @@ def cross_origin(*args, **kwargs):
 
 
     :param origins: The origin, or list of origins to allow requests from.
-        The origin(s) may be regular expressions, exact origins, or else an
-        asterisk.
+        The origin(s) may be regular expressions, case-sensitive strings,
+        or else an asterisk
 
         Default : '*'
-    :type origins: list or string
+    :type origins: list, string or regex
 
     :param methods: The method or list of methods which the allowed origins
         are allowed to access for non-simple requests.
@@ -96,10 +99,11 @@ def cross_origin(*args, **kwargs):
     :type expose_headers: list or string
 
     :param allow_headers: The header or list of header field names which can be
-        used when this resource is accessed by allowed origins
+        used when this resource is accessed by allowed origins. The header(s)
+        may be regular expressions, case-sensitive strings, or else an asterisk.
 
-        Default : None
-    :type allow_headers: list or string
+        Default : '*'
+    :type allow_headers: list, string or regex
 
     :param supports_credentials: Allows users to make authenticated requests.
         If true, injects the `Access-Control-Allow-Credentials` header in
@@ -268,7 +272,7 @@ class CORS(object):
                 return resp
 
             for res_regex, res_options in resources:
-                if _try_match(res_regex, request.path):
+                if _try_match(request.path, res_regex):
                     _options = options.copy()
                     _options.update(res_options)
                     _serialize_options(_options)
@@ -343,24 +347,22 @@ def _get_regexp_pattern(regexp):
 
 def _get_cors_origin(options, request_origin):
     origins = options.get('origins')
-    wildcard = '*' in origins
+    wildcard = r'.*' in origins
+    logger.debug("Origins Option %s", [origins])
+
     # If the Origin header is not present terminate this set of steps.
     # The request is outside the scope of this specification.-- W3Spec
     if request_origin:
         getLogger().debug("CORS request received with 'Origin' %s", request_origin)
 
         # If the allowed origins is an asterisk or 'wildcard', always match
-        if wildcard:
+        if wildcard and options.get('send_wildcard'):
             getLogger().debug("Allowed origins are set to '*', assuming valid request")
-            if options.get('send_wildcard'):
-                return '*'
-            else:
-                return request_origin
-
+            return '*'
         # If the value of the Origin header is a case-sensitive match
         # for any of the values in list of origins
-        elif any(_try_match(pattern, request_origin) for pattern in origins):
-            getLogger().debug("Given origin matches set of allowed origins")
+        elif _try_match_any(request_origin, origins):
+            logger.debug("Given origin matches set of allowed origins")
             # Add a single Access-Control-Allow-Origin header, with either
             # the value of the Origin header or the string "*" as value.
             # -- W3Spec
@@ -369,19 +371,9 @@ def _get_cors_origin(options, request_origin):
             getLogger().debug("Given origin does not match any of allowed origins: %s",
                          map(_get_regexp_pattern, origins))
             return None
-
-    # Unless always_send is set, then ignore W3 spec as long as there is a
-    # valid list of origins, e.g. one that is not merely comrpised of regular
-    # expressions.
-    # TODO: remove this. It breaks the spec, and practically shouldn't be used
-    # This will only be exceuted it there is no Origin in the request, in which
-    # case, why bother with CORS?
-    elif options.get('always_send') and options.get('origins_str'):
-        getLogger().debug("No 'Origin' header in request, skipping")
-        return options.get('origins_str')
     # Terminate these steps, return the original request untouched.
     else:
-        getLogger().debug("'Origin' header was not send, which means CORS was not requested, skipping")
+        getLogger().debug("'Origin' header was not set, which means CORS was not requested, skipping")
         return None
 
 
@@ -415,9 +407,20 @@ def _get_cors_headers(options, request_headers, request_method,
         # If there is no Access-Control-Request-Method header or if parsing
         # failed, do not set any additional headers
         if acl_request_method and acl_request_method in options.get('methods'):
+
+            # If method is not a case-sensitive match for any of the values in
+            # list of methods do not set any additional headers and terminate this set of steps.
+
+            acl_request_headers = request_headers.get(ACL_REQUEST_HEADERS, [])
+            if acl_request_headers:
+                acl_request_headers = [h.strip() for h in acl_request_headers.split(',')]
+
+            def matches_allows_headers(h):
+                return _try_match_any(h, options.get('allow_headers'))
+
+            headers[ACL_ALLOW_HEADERS] = ', '.join(filter(matches_allows_headers, acl_request_headers))
             headers[ACL_MAX_AGE] = options.get('max_age')
             headers[ACL_METHODS] = options.get('methods')
-            headers[ACL_ALLOW_HEADERS] = options.get('allow_headers')
 
     # http://www.w3.org/TR/cors/#resource-implementation
     if headers[ACL_ORIGIN] != '*' and options.get('vary_header'):
@@ -471,19 +474,15 @@ def _re_fix(reg):
         enable the CORS app extension to have a more consistent api with the
         decorator.
     '''
-    pattern = r'.*' if reg == r'*' else reg
+    return r'.*' if reg == r'*' else reg
 
-    try:
-        return re.compile(pattern)
-    except:  # invalid regex, return original string
-        return pattern
+def _try_match_any(inst, patterns):
+    return any(_try_match(inst, pattern) for pattern in patterns)
 
 
-def _try_match(pattern, request_origin):
+def _try_match(request_origin, pattern):
     '''
         Safely attempts to match a pattern or string to a request origin.
-
-        If a pattern is an illegal regular expression
     '''
     try:
         return re.match(pattern, request_origin)
@@ -535,28 +534,34 @@ def _filter_false(predicate, iterable):
     '''
     return filter(lambda x: not predicate(x), iterable)
 
+def _ensure_iterable(inst):
+    '''
+        Wraps scalars or string types as a list, or returns the iterable instance.
+
+    '''
+    if isinstance(inst, string_types):
+        return [inst]
+    elif not isinstance(inst, collections.Iterable):
+        return [inst]
+    else:
+        return inst
+
+def _sanitize_regex_param(param):
+    return [_re_fix(x) for x in _ensure_iterable(param)]
 
 def _serialize_options(options):
     '''
         A helper method to serialize and processes the options dictionary
         where applicable.
     '''
-    # ensure origins is a list of allowed origins with at least one entry.
-    if isinstance(options.get('origins'), string_types):
-        options['origins'] = [options.get('origins')]
 
-    # remove regular expressions from the list of serialized origins to be
-    # returned in the case of a request with no Origin header, while
-    # always_send is set to True
-    options['origins_str'] = _filter_false(_is_regexp, options.get('origins'))
+    # Ensure origins is a list of allowed origins with at least one entry.
+    options['origins'] = _sanitize_regex_param(options.get('origins'))
+    options['allow_headers'] = _sanitize_regex_param(options.get('allow_headers'))
 
-    if 'headers' in options:
-        options['allow_headers'] = options.pop('headers')
 
-    _serialize_option(options, 'origins_str')
-    _serialize_option(options, 'methods', upper=True)
-    _serialize_option(options, 'allow_headers')
     _serialize_option(options, 'expose_headers')
+    _serialize_option(options, 'methods')
     _serialize_option(options, 'supports_credentials')
 
     if isinstance(options.get('max_age'), timedelta):

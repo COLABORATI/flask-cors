@@ -43,18 +43,15 @@ class FlaskCorsTestCase(unittest.TestCase):
     def iter_responses(self, path, verbs=['get', 'head', 'options'], **kwargs):
         for verb in verbs:
             yield self._request(verb.lower(), path, **kwargs)
-        # with self.app.test_client() as c:
-        #     for verb in verbs:
-        #         yield getattr(c, verb.lower())(path, **kwargs)
 
     def _request(self, verb, *args, **kwargs):
         _origin = kwargs.pop('origin', None)
+        headers = kwargs.pop('headers', {})
         if _origin:
-            kwargs['headers'] = kwargs.get('headers', {})
-            kwargs['headers'].update(Origin=_origin)
-
+            headers.update(Origin=_origin)
+        print headers
         with self.app.test_client() as c:
-            return getattr(c, verb)(*args, **kwargs)
+            return getattr(c, verb)(*args, headers=headers, **kwargs)
 
     def get(self, *args, **kwargs):
         return self._request('get', *args, **kwargs)
@@ -77,8 +74,12 @@ class FlaskCorsTestCase(unittest.TestCase):
     def delete(self, *args, **kwargs):
         return self._request('delete', *args, **kwargs)
 
-    def preflight(self, path, method='GET', json=True):
+    def preflight(self, path, method='GET', cors_request_headers=None, json=True, **kwargs):
         headers = {'Access-Control-Request-Method': method}
+
+        if cors_request_headers:
+            headers['Access-Control-Request-Headers'] = ','.join(cors_request_headers)
+
         if json:
             headers.update({'Content-Type':'application/json'})
 
@@ -108,4 +109,3 @@ class AppConfigTest(object):
         function_to_rename.__name__ = 'func_%s' % path
 
         self.app.route(path)(function_to_rename)
-

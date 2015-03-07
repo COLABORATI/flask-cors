@@ -26,9 +26,9 @@ class AllowHeadersTestCase(FlaskCorsTestCase):
         def test_default():
             return 'Welcome!'
 
-        @self.app.route('/test_override')
+        @self.app.route('/test_allow_headers')
         @cross_origin(allow_headers=['X-Example-Header-B', 'X-Example-Header-A'])
-        def test_override():
+        def test_allow_headers():
             return 'Welcome!'
 
         @self.app.route('/test_backwards_compatible')
@@ -41,29 +41,36 @@ class AllowHeadersTestCase(FlaskCorsTestCase):
             self.assertTrue(resp.headers.get(ACL_ALLOW_HEADERS) is None,
                             "Default should have no allowed headers")
 
-    def test_override(self):
+    def test_allow_headers(self):
         '''
             If there is an Access-Control-Request-Method header in the request
             and Access-Control-Request-Method is allowed for cross origin
             requests and request method is OPTIONS,
             the Access-Control-Allow-Headers header should be echoed back.
         '''
-        resp = self.preflight('/test_override')
+        resp = self.preflight('/test_allow_headers', cors_request_headers=['X-Example-Header-A',,'X-Example-Header-B'])
         self.assertEqual(resp.headers.get(ACL_ALLOW_HEADERS), 'X-Example-Header-A, X-Example-Header-B')
 
-    def test_backwards_compatible(self):
+    def test_allow_headers_with_request_headers(self):
         '''
-            Version 1.10.2 changed the name of the parameter from 'headers'
-            to 'allow_headers'
+            If there is an Access-Control-Request-Method header in the request
+            and Access-Control-Request-Method is allowed for cross origin
+            requests and request method is OPTIONS, and every element in the Access-Control-Request-Headers
+            is an allowed header, the Access-Control-Allow-Headers header should be echoed back.
         '''
-        resp = self.preflight('/test_backwards_compatible')
-        self.assertEqual(resp.headers.get(ACL_ALLOW_HEADERS),
-                         'X-Example-Header-A, X-Example-Header-B')
+        resp = self.preflight('/test_allow_headers', cors_request_headers=['X-Example-Header-A'])
+        self.assertEqual(resp.headers.get(ACL_ALLOW_HEADERS), 'X-Example-Header-A, X-Example-Header-B')
 
-        for resp in self.iter_responses('/test_backwards_compatible',
-                                        verbs=['HEAD', 'GET']):
-            self.assertTrue(resp.headers.get(ACL_ALLOW_HEADERS) is None)
+    def test_allow_headers_with_unmatched_request_headers(self):
+        '''
+            If every element in the Access-Control-Request-Headers is not an allowed header,
+            then abort the request and do not return CORS headers.
+        '''
+        resp = self.preflight('/test_allow_headers', cors_request_headers=['X-Not-Found-Header'])
+        self.assertEqual(resp.headers.get(ACL_ALLOW_HEADERS), None)
 
+        resp = self.preflight('/test_allow_headers', cors_request_headers=['X-Example-Header-A', 'X-Example-Header-B'])
+        self.assertEqual(resp.headers.get(ACL_ALLOW_HEADERS), None)
 
 class AppConfigAllowHeadersTestCase(AppConfigTest, AllowHeadersTestCase):
     def __init__(self, *args, **kwargs):
@@ -76,31 +83,38 @@ class AppConfigAllowHeadersTestCase(AppConfigTest, AllowHeadersTestCase):
             return 'Welcome!'
         super(AppConfigAllowHeadersTestCase, self).test_default()
 
-    def test_override(self):
+    def test_allow_headers(self):
         self.app.config['CORS_ALLOW_HEADERS'] = ['X-Example-Header-B',
                                                  'X-Example-Header-A']
 
-        @self.app.route('/test_override')
+        @self.app.route('/test_allow_headers')
         @cross_origin()
         def test_list():
             return 'Welcome!'
 
-        super(AppConfigAllowHeadersTestCase, self).test_override()
+        super(AppConfigAllowHeadersTestCase, self).test_allow_headers()
 
-    def test_backwards_compatible(self):
-        '''
-            Version 1.10.2 changed the name of the parameter from 'headers'
-            to 'allow_headers'
-        '''
-        self.app.config['CORS_HEADERS'] = ['X-Example-Header-B',
-                                           'X-Example-Header-A']
+    def test_allow_headers_with_request_headers(self):
+        self.app.config['CORS_ALLOW_HEADERS'] = ['X-Example-Header-B',
+                                                 'X-Example-Header-A']
 
-        @self.app.route('/test_backwards_compatible')
+        @self.app.route('/test_allow_headers')
         @cross_origin()
         def test_list():
             return 'Welcome!'
 
-        super(AppConfigAllowHeadersTestCase, self).test_backwards_compatible()
+        super(AppConfigAllowHeadersTestCase, self).test_allow_headers_with_request_headers()
+
+    def test_allow_headers_with_request_headers(self):
+        self.app.config['CORS_ALLOW_HEADERS'] = ['X-Example-Header-B',
+                                                 'X-Example-Header-A']
+
+        @self.app.route('/test_allow_headers')
+        @cross_origin()
+        def test_list():
+            return 'Welcome!'
+
+        super(AppConfigAllowHeadersTestCase, self).test_allow_headers_with_unmatched_request_headers()
 
 
 if __name__ == "__main__":
