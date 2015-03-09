@@ -20,30 +20,40 @@ except:
 
 letters = 'abcdefghijklmnopqrstuvwxyz'  # string.letters is not PY3 compatible
 
-class ResourceMap(object):
+class RouteMap(object):
     def __init__(self):
         self.map = {}
 
-    def add_route(self, path,methods=None, **kwargs):
-        self.map[path] = (kwargs, methods)
+    def add(self, path, methods={}, **kwargs):
+        self.map[path] = (methods, kwargs)
 
-    def iter_routes(self):
-        for path, tup in self.map.items():
-            yield (path, tup[0], tup[1])
+    def __iter__(self):
+        for path, (methods, cors_kwargs) in self.map.items():
+            flask_kwargs = {}
+            if methods:
+                flask_kwargs['methods'] = methods
+            yield (path, flask_kwargs, cors_kwargs)
 
 class OriginsCase(object):
-    # RESOURCES = ResourceMap()
-    #
-    # RESOURCES.add_route('/')
-    # RESOURCES.add_route('/test_list', origins=)
-    RESOURCES = {
-        '/':[{}],
-        '/test_list': [{'origins':['http://foo.com', 'http://bar.com']}],
-        '/test_string': [{'origins':'http://foo.com' }],
-        '/test_regex_list': [{'origins':[r".*.example.com", r".*.otherexample.com"]}],
-        '/test_subdomain_regex': [{'origins':r"http?://\w*\.?example\.com:?\d*/?.*"}],
-        '/test_regex_mixed_list': [{'origins': ["http://example.com", r".*.otherexample.com"]}]
-    }
+    def get_routes(self):
+        routes = RouteMap()
+        routes.add('/')
+        routes.add('/test_list', origins=['http://foo.com', 'http://bar.com'])
+        routes.add('/test_string', origins='http://foo.com')
+        routes.add('/test_regex_list', origins=[r".*.example.com", r".*.otherexample.com"])
+        routes.add('/test_subdomain_regex', origins=r"http?://\w*\.?example\.com:?\d*/?.*")
+        routes.add('/test_regex_mixed_list', origins=["http://example.com", r".*.otherexample.com"])
+        return routes
+
+        # return routes
+    # RESOURCES = {
+    #     '/':[{}],
+    #     '/test_list': [{'origins':['http://foo.com', 'http://bar.com']}],
+    #     '/test_string': [{'origins':'http://foo.com' }],
+    #     '/test_regex_list': [{'origins':[r".*.example.com", r".*.otherexample.com"]}],
+    #     '/test_subdomain_regex': [{'origins':r"http?://\w*\.?example\.com:?\d*/?.*"}],
+    #     '/test_regex_mixed_list': [{'origins': ["http://example.com", r".*.otherexample.com"]}]
+    # }
 
     def test_wildcard_no_origin(self):
         ''' If there is no Origin header in the request, the
@@ -67,11 +77,10 @@ class OriginsCase(object):
             Access-Control-Allow-Origin header should be echoed.
         '''
         resp = self.get('/test_list', origin='http://foo.com')
-        self.assertEqual(resp.headers.get(ACL_ORIGIN),
-                         'http://foo.com')
+        self.assertEqual(resp.headers.get(ACL_ORIGIN), 'http://foo.com')
+
         resp = self.get('/test_list', origin='http://bar.com')
-        self.assertEqual(resp.headers.get(ACL_ORIGIN),
-                         'http://bar.com')
+        self.assertEqual(resp.headers.get(ACL_ORIGIN),'http://bar.com')
 
     def test_string_serialized(self):
         ''' If there is an Origin header in the request,
@@ -82,8 +91,7 @@ class OriginsCase(object):
 
 
     def test_not_matching_origins(self):
-        for resp in self.iter_responses('/test_list',
-                                        headers={'origin': "http://bazz.com"}):
+        for resp in self.iter_responses('/test_list', origin="http://bazz.com"):
             self.assertFalse(ACL_ORIGIN in resp.headers)
 
     def test_subdomain_regex(self):
@@ -125,47 +133,46 @@ class OriginsCase(object):
 class FlaskCorsDecoratorTestCase():
     def setUp(self):
         self.app = Flask(__name__)
-        for route, options in self.RESOURCES.items():
-            cors_options = options[0]
-            mount_options = options[1] if len(options) > 1 else {}
+        for path, route_options, cors_options in self.get_routes():
 
             # Flask checks the name of the function to ensure that iew mappings
             # do not collide. We work around it by generating a new function name
             # for the path
             def function_to_rename():
-                return 'STUBBED: %s' % route
-            function_to_rename.__name__ = 'route_%s' % route
+                return 'STUBBED: %s' % path
+            function_to_rename.__name__ = 'route_%s' % path
 
             wrapped_function =  cross_origin(**cors_options)(function_to_rename)
-            self.app.route(route)(wrapped_function)
+            self.app.route(path)(wrapped_function)
+
+    def get_app(self):
+        return self.app
 
 class FlaskCorsDecoratorConfigTestCase():
     def setUp(self):
-        self.app = Flask(__name__)
-        for route, options in self.RESOURCES.items():
-            cors_options = options[0]
-            mount_options = options[1] if len(options) > 1 else {}
-
-
-            for k,v in options.items():
-                self.app.config['CORS_'+ k.upper()] = v
+        self.apps = {}
+        for path, route_options, cors_options in self.get_routes():
+            apps[path] = Flask(__name__ + path)
+            app = apps[path]
+            for k,v in cors_options.items():
+                app.config['CORS_'+ k.upper()] = v
 
             # Flask checks the name of the function to ensure that iew mappings
             # do not collide. We work around it by generating a new function name
             # for the path
             def function_to_rename():
-                return 'STUBBED: %s' % route
-            function_to_rename.__name__ = 'route_%s' % route
+                return 'STUBBED: %s' % path
+            function_to_rename.__name__ = 'route_%s' % path
 
             wrapped_function =  cross_origin()(function_to_rename)
-            self.app.route(route)(wrapped_function)
+            app.route(path)(wrapped_function)
 
 
 class OriginsDecoratorTestCase(OriginsCase, FlaskCorsDecoratorTestCase, FlaskCorsTestCase):
     pass
-#
-# class OriginsDecoratorConfigTestCase(OriginsCase, FlaskCorsDecoratorConfigTestCase, FlaskCorsTestCase):
-#     pass
+
+class OriginsDecoratorConfigTestCase(OriginsCase, FlaskCorsDecoratorConfigTestCase, FlaskCorsTestCase):
+    pass
 
 
 # class OriginsAppTestCase(OriginsCase)
