@@ -45,7 +45,7 @@ ACL_REQUEST_HEADERS = 'Access-Control-Request-Headers'
 ALL_METHODS = ['GET', 'HEAD', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE']
 CONFIG_OPTIONS = ['CORS_ORIGINS', 'CORS_METHODS', 'CORS_ALLOW_HEADERS',
                   'CORS_EXPOSE_HEADERS', 'CORS_SUPPORTS_CREDENTIALS',
-                  'CORS_MAX_AGE', 'CORS_SEND_WILDCARD', 'CORS_ALWAYS_SEND',
+                  'CORS_MAX_AGE', 'CORS_SEND_WILDCARD',
                   'CORS_AUTOMATIC_OPTIONS', 'CORS_VARY_HEADER',
                   'CORS_RESOURCES', 'CORS_INTERCEPT_EXCEPTIONS']
 
@@ -63,7 +63,6 @@ RegexObject = type(re.compile(''))
 _defaults_dict = dict(origins='*',
                       methods=ALL_METHODS,
                       allow_headers='*',
-                      always_send=True,
                       automatic_options=True,
                       send_wildcard=True,
                       vary_header=True)
@@ -126,12 +125,6 @@ def cross_origin(*args, **kwargs):
 
         Default : True
     :type send_wildcard: bool
-
-    :param always_send: If True, CORS headers are sent even if there is no
-        `Origin` in the request's headers.
-
-        Default : True
-    :type always_send: bool
 
     :param automatic_options: If True, CORS headers will be returned for
         OPTIONS requests. For use with cross domain POST requests which
