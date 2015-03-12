@@ -373,7 +373,7 @@ def _get_allow_headers(options, request_headers):
     getLogger().debug("'acl_requesT_header':%s", acl_request_headers)
     if acl_request_headers:
 
-        acl_request_headers = filter([h.strip() for h in acl_request_headers.split(',')])
+        acl_request_headers = filter(None, [h.strip() for h in acl_request_headers.split(',')]) # remove falsey values
         matching_headers = filter(
             lambda h: _try_match_any(h, options.get('allow_headers')), # any header that matches in the allow_headers
             acl_request_headers
